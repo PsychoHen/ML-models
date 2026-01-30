@@ -1,3 +1,6 @@
+
+
+
 import pandas as pd
 import joblib
 from fastapi import FastAPI, Request
@@ -16,25 +19,22 @@ TABLE_ID = "miik72oo6rv6liy"
 
 @app.get("/")
 def home():
-    # Esta es la respuesta rápida para que Koyeb vea que la app está viva
     return {"message": "API de Predicción NocoDB - Activa"}
 
 @app.post("/predict")
 async def predict(request: Request):
     try:
-        # 1. Cargamos el modelo aquí adentro para que el arranque sea veloz
-        # Asegúrate de que el archivo en GitHub sea 'modelo_potencial.pkl'
         model = joblib.load("modelo_potencial.pkl")
-
-        # 2. Recibir datos de NocoDB
         payload = await request.json()
+        
+        # NocoDB envía los datos dentro de 'data' o directamente
         row_data = payload.get('data', payload)
         row_id = row_data.get('Id') or row_data.get('id')
 
         if not row_id:
             return {"error": "No se recibió un ID válido"}
 
-        # 3. Preparar datos para el modelo (usando los nombres de tu CSV)
+        # Preparar datos para el modelo
         input_df = pd.DataFrame([{
             'Sector': row_data.get('Sector'),
             'In store/Ecomm': row_data.get('In store/Ecomm'),
@@ -45,33 +45,32 @@ async def predict(request: Request):
             'Ticket promedio': row_data.get('Ticket promedio')
         }])
 
-        # 4. Predicción
         prediction = model.predict(input_df)[0]
         prediction_final = round(float(prediction), 2)
 
-        # 5. Enviar a NocoDB
-        # Asegúrate de que la columna en NocoDB se llame exactamente 'Potencial'
+        # --- CAMBIO AQUÍ: Nombre de columna con el símbolo # ---
         patch_url = f"{BASE_URL}/{BASE_ID}/{TABLE_ID}/{row_id}"
         headers = {
             "xc-token": NOCODB_API_TOKEN,
             "Content-Type": "application/json"
         }
         
+        # Enviamos el dato a la columna '# Potencial'
         response = requests.patch(
             patch_url, 
-            json={"Potencial": prediction_final}, 
+            json={"# Potencial": prediction_final}, 
             headers=headers
         )
 
         return {
             "status": "success",
             "prediction": prediction_final,
-            "nocodb_response": response.status_code
+            "nocodb_response_code": response.status_code,
+            "nocodb_response_body": response.text
         }
 
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
 if __name__ == "__main__":
-    # Puerto 8000 como configuraste en Koyeb
     uvicorn.run(app, host="0.0.0.0", port=8000)
