@@ -41,44 +41,44 @@ async def predict(request: Request):
             'Ticket promedio': row_data.get('Ticket promedio')
         }])
 
+  
+
+        # Predicción
         prediction = model.predict(input_df)[0]
         prediction_final = round(float(prediction), 2)
 
-        # Enviar de vuelta a NocoDB
+        # --- ENVÍO DE VUELTA A NOCODB ---
         patch_url = f"{BASE_URL}/{BASE_ID}/{TABLE_ID}/{row_id}"
         headers = {
             "xc-token": NOCODB_API_TOKEN,
             "Content-Type": "application/json"
         }
         
-        # Usamos "Potencial" sin el símbolo #
+        # Realizamos la actualización
         response = requests.patch(
             patch_url, 
             json={"Potencial": prediction_final}, 
             headers=headers
         )
 
-        # --- AQUÍ SE ENVÍA EL DATO ---
-        response = requests.patch(
-            patch_url, 
-            json={"Potencial": prediction_final}, 
-            headers=headers
-        )
-
-        # --- REEMPLAZA TU RETURN VIEJO POR ESTE ---
-        # Esto imprimirá en los logs de Koyeb lo que NocoDB responda
-        print(f"DEBUG - Status Code: {response.status_code}")
-        print(f"DEBUG - Respuesta completa: {response.text}")
+        # ESTO ES LO QUE TIENES QUE VER EN LOS LOGS DE KOYEB PARA DEBUGEAR
+        print(f"--- INTENTO DE ACTUALIZACIÓN ---")
+        print(f"ID: {row_id} | Predicción: {prediction_final}")
+        print(f"Respuesta de NocoDB: {response.status_code} - {response.text}")
 
         return {
             "status": "success",
             "prediction": prediction_final,
-            "debug_noco": {
-                "id_usado": row_id,
-                "status_noco": response.status_code,
-                "detalle": response.text  # Aquí verás si NocoDB dice "error: column not found"
+            "noco_debug": {
+                "status_code": response.status_code,
+                "response_text": response.text
             }
         }
 
     except Exception as e:
-        return {"status": "error", "message": str(e)}
+        # Esto te avisará en Koyeb si el código falla antes de llegar a NocoDB
+        print(f"ERROR CRÍTICO: {str(e)}")
+        return {
+            "status": "error", 
+            "message": str(e)
+        }
