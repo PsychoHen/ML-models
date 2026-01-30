@@ -7,7 +7,6 @@ import requests
 app = FastAPI()
 
 # --- CONFIGURACIÓN ---
-# IMPORTANTE: En Koyeb, crea una variable llamada NOCODB_TOKEN y pega tu clave ahí
 NOCODB_API_TOKEN = os.getenv("NOCODB_TOKEN") 
 BASE_URL = "https://app.nocodb.com/api/v1/db/data/v1"
 BASE_ID = "prz1t6q6jcgmw7i"
@@ -20,17 +19,23 @@ def home():
 @app.post("/predict")
 async def predict(request: Request):
     try:
-        # Cargamos el modelo (ahora funcionará gracias al requirements.txt)
+        # 1. Cargar el modelo
         model = joblib.load("modelo_potencial.pkl")
         payload = await request.json()
         
+        # LOG: Ver qué datos exactos manda NocoDB
+        print(f"DEBUG - Datos recibidos: {payload}")
+        
         row_data = payload.get('data', payload)
-        row_id = row_data.get('Id') or row_data.get('id') or row_data.get('#')
+        
+        # 2. Capturar ID (todas las variantes posibles)
+        row_id = row_data.get('Id') or row_data.get('id') or row_data.get('ID') or row_data.get('#')
 
         if not row_id:
-            return {"error": "No se recibió un ID válido"}
+            print("ERROR: ID no encontrado")
+            return {"error": "Falta ID", "payload": payload}
 
-        # Mapeo de datos (Asegúrate que los nombres coincidan con NocoDB)
+        # 3. Preparar datos para el modelo
         input_df = pd.DataFrame([{
             'Sector': row_data.get('Sector'),
             'In store/Ecomm': row_data.get('In store/Ecomm'),
@@ -41,44 +46,43 @@ async def predict(request: Request):
             'Ticket promedio': row_data.get('Ticket promedio')
         }])
 
-  
+        # --- IMPORTANTE: Llenar vacíos para que RandomForest no falle ---
+        input_df = input_df.fillna(0)
 
-        # Predicción
+        # 4. Predicción
         prediction = model.predict(input_df)[0]
         prediction_final = round(float(prediction), 2)
 
-        # --- ENVÍO DE VUELTA A NOCODB ---
+        # 5. Enviar a NocoDB y capturar su respuesta
         patch_url = f"{BASE_URL}/{BASE_ID}/{TABLE_ID}/{row_id}"
         headers = {
             "xc-token": NOCODB_API_TOKEN,
             "Content-Type": "application/json"
         }
         
-        # Realizamos la actualización
+        # Realizamos el PATCH
         response = requests.patch(
             patch_url, 
             json={"Potencial": prediction_final}, 
             headers=headers
         )
 
-        # ESTO ES LO QUE TIENES QUE VER EN LOS LOGS DE KOYEB PARA DEBUGEAR
-        print(f"--- INTENTO DE ACTUALIZACIÓN ---")
-        print(f"ID: {row_id} | Predicción: {prediction_final}")
-        print(f"Respuesta de NocoDB: {response.status_code} - {response.text}")
+        # --- LOGS DE DIAGNÓSTICO ---
+        print(f"DEBUG - Fila: {row_id}")
+        print(f"DEBUG - Predicción: {prediction_final}")
+        print(f"DEBUG - NocoDB Status: {response.status_code}")
+        print(f"DEBUG - NocoDB Body: {response.text}")
 
+        # 6. Retornar todo para ver el resultado en el historial del Webhook
         return {
             "status": "success",
             "prediction": prediction_final,
-            "noco_debug": {
+            "nocodb_info": {
                 "status_code": response.status_code,
-                "response_text": response.text
+                "response": response.json() if response.status_code == 200 else response.text
             }
         }
 
     except Exception as e:
-        # Esto te avisará en Koyeb si el código falla antes de llegar a NocoDB
         print(f"ERROR CRÍTICO: {str(e)}")
-        return {
-            "status": "error", 
-            "message": str(e)
-        }
+        return {"status": "error", "message": str(e)}
