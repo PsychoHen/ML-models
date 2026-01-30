@@ -23,19 +23,34 @@ async def predict(request: Request):
         model = joblib.load("modelo_potencial.pkl")
         payload = await request.json()
         
-        # LOG: Ver qué datos exactos manda NocoDB
-        print(f"DEBUG - Datos recibidos: {payload}")
-        
-        row_data = payload.get('data', payload)
-        
-        # 2. Capturar ID (todas las variantes posibles)
-        row_id = row_data.get('Id') or row_data.get('id') or row_data.get('ID') or row_data.get('#')
+        print(f"DEBUG - Payload completo recibido: {payload}")
+
+        # 2. EXTRAER DATOS E ID (Navegación profunda según tu log)
+        # Tu log mostró que los datos están en payload['data']['data']['rows'][0]
+        try:
+            data_wrapper = payload.get('data', {})
+            inner_data = data_wrapper.get('data', {})
+            rows = inner_data.get('rows', [])
+            
+            if rows:
+                row_data = rows[0]
+                row_id = row_data.get('Id')
+                print(f"DEBUG - ID encontrado en rows: {row_id}")
+            else:
+                # Fallback si la estructura cambia
+                row_data = payload.get('data', payload)
+                row_id = row_data.get('Id') or row_data.get('id')
+                print(f"DEBUG - ID buscado en fallback: {row_id}")
+        except Exception as e:
+            print(f"DEBUG - Error extrayendo datos: {e}")
+            row_data = {}
+            row_id = None
 
         if not row_id:
-            print("ERROR: ID no encontrado")
-            return {"error": "Falta ID", "payload": payload}
+            print("ERROR: No se pudo obtener el ID numérico de la fila")
+            return {"status": "error", "message": "ID no encontrado", "debug": payload}
 
-        # 3. Preparar datos para el modelo
+        # 3. Preparar DataFrame para el modelo
         input_df = pd.DataFrame([{
             'Sector': row_data.get('Sector'),
             'In store/Ecomm': row_data.get('In store/Ecomm'),
@@ -46,40 +61,39 @@ async def predict(request: Request):
             'Ticket promedio': row_data.get('Ticket promedio')
         }])
 
-        # --- IMPORTANTE: Llenar vacíos para que RandomForest no falle ---
+        # Llenar vacíos con 0 para evitar el error de RandomForest
         input_df = input_df.fillna(0)
 
         # 4. Predicción
         prediction = model.predict(input_df)[0]
         prediction_final = round(float(prediction), 2)
 
-        # 5. Enviar a NocoDB y capturar su respuesta
+        # 5. Enviar a NocoDB
         patch_url = f"{BASE_URL}/{BASE_ID}/{TABLE_ID}/{row_id}"
         headers = {
             "xc-token": NOCODB_API_TOKEN,
             "Content-Type": "application/json"
         }
         
-        # Realizamos el PATCH
         response = requests.patch(
             patch_url, 
             json={"Potencial": prediction_final}, 
             headers=headers
         )
 
-        # --- LOGS DE DIAGNÓSTICO ---
-        print(f"DEBUG - Fila: {row_id}")
+        # --- LOGS DE DEBUG FINALES ---
+        print(f"DEBUG - ID Fila Procesada: {row_id}")
         print(f"DEBUG - Predicción: {prediction_final}")
         print(f"DEBUG - NocoDB Status: {response.status_code}")
-        print(f"DEBUG - NocoDB Body: {response.text}")
+        print(f"DEBUG - NocoDB Respuesta: {response.text}")
 
-        # 6. Retornar todo para ver el resultado en el historial del Webhook
         return {
             "status": "success",
             "prediction": prediction_final,
-            "nocodb_info": {
-                "status_code": response.status_code,
-                "response": response.json() if response.status_code == 200 else response.text
+            "noco_debug": {
+                "id_utilizado": row_id,
+                "noco_status": response.status_code,
+                "noco_response": response.text
             }
         }
 
