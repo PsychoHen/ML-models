@@ -25,7 +25,7 @@ async def predict(request: Request):
         payload = await request.json()
         
         row_data = payload.get('data', payload)
-        row_id = row_data.get('Id') or row_data.get('id')
+        row_id = row_data.get('Id') or row_data.get('id') or row_data.get('#')
 
         if not row_id:
             return {"error": "No se recibió un ID válido"}
@@ -58,7 +58,27 @@ async def predict(request: Request):
             headers=headers
         )
 
-        return {"status": "success", "prediction": prediction_final, "db_status": response.status_code}
+        # --- AQUÍ SE ENVÍA EL DATO ---
+        response = requests.patch(
+            patch_url, 
+            json={"Potencial": prediction_final}, 
+            headers=headers
+        )
+
+        # --- REEMPLAZA TU RETURN VIEJO POR ESTE ---
+        # Esto imprimirá en los logs de Koyeb lo que NocoDB responda
+        print(f"DEBUG - Status Code: {response.status_code}")
+        print(f"DEBUG - Respuesta completa: {response.text}")
+
+        return {
+            "status": "success",
+            "prediction": prediction_final,
+            "debug_noco": {
+                "id_usado": row_id,
+                "status_noco": response.status_code,
+                "detalle": response.text  # Aquí verás si NocoDB dice "error: column not found"
+            }
+        }
 
     except Exception as e:
         return {"status": "error", "message": str(e)}
