@@ -3,39 +3,38 @@ import joblib
 from fastapi import FastAPI, Request
 import requests
 import uvicorn
+import os
 
 app = FastAPI()
 
-# --- CONFIGURACIÓN DE NOCODB ---
-# He usado el token que me pasaste y los IDs de tu URL
-NOCODB_API_TOKEN = "rw_AZF4bcQqEbO1lfVFd-vHo3gCRqnPMaBG9Co-W"
+# --- CONFIGURACIÓN CON TUS DATOS REALES ---
+# El código buscará estos valores en el panel de Koyeb
+NOCODB_API_TOKEN = os.getenv("rw_AZF4bcQqEbO1lfVFd-vHo3gCRqnPMaBG9Co-W")
 BASE_URL = "https://app.nocodb.com/api/v1/db/data/v1"
 BASE_ID = "prz1t6q6jcgmw7i"
 TABLE_ID = "miik72oo6rv6liy"
 
-# 1. Cargar el modelo .pkl al iniciar la aplicación
-# Asegúrate de que el archivo se llame exactamente así en GitHub
+# Cargar el modelo .pkl
+# Asegúrate de que el archivo en GitHub se llame exactamente así
 model = joblib.load("modelo_potencial.pkl")
 
 @app.get("/")
 def home():
-    return {"message": "API de Predicción de Potencial activa"}
+    return {"message": "API de Predicción NocoDB - Activa"}
 
 @app.post("/predict")
 async def predict(request: Request):
     try:
-        # 2. Recibir datos del Webhook de NocoDB
+        # 1. Recibir datos de NocoDB
         payload = await request.json()
-        
-        # NocoDB suele enviar la fila dentro de una clave llamada 'data'
         row_data = payload.get('data', payload)
         row_id = row_data.get('Id') or row_data.get('id')
 
         if not row_id:
-            return {"error": "No se encontró el ID de la fila"}
+            return {"error": "No se recibió un ID válido de NocoDB"}
 
-        # 3. Mapear los datos recibidos al formato del modelo
-        # Importante: Los nombres a la izquierda deben ser IGUALES a los del Excel original
+        # 2. Mapear datos al formato del modelo
+        # Usamos los nombres de columnas de tu CSV original
         input_df = pd.DataFrame([{
             'Sector': row_data.get('Sector'),
             'In store/Ecomm': row_data.get('In store/Ecomm'),
@@ -46,12 +45,12 @@ async def predict(request: Request):
             'Ticket promedio': row_data.get('Ticket promedio')
         }])
 
-        # 4. Ejecutar la predicción
+        # 3. Realizar predicción
         prediction = model.predict(input_df)[0]
         prediction_final = round(float(prediction), 2)
 
-        # 5. Enviar el resultado de vuelta a NocoDB (PATCH)
-        # Se asume que tu columna en NocoDB se llama "Potencial"
+        # 4. Enviar resultado de vuelta a NocoDB
+        # IMPORTANTE: Tu columna en NocoDB debe llamarse "Potencial"
         patch_url = f"{BASE_URL}/{BASE_ID}/{TABLE_ID}/{row_id}"
         headers = {
             "xc-token": NOCODB_API_TOKEN,
@@ -68,7 +67,7 @@ async def predict(request: Request):
             "status": "success",
             "row_id": row_id,
             "prediction": prediction_final,
-            "nocodb_status": response.status_code
+            "nocodb_http_code": response.status_code
         }
 
     except Exception as e:
